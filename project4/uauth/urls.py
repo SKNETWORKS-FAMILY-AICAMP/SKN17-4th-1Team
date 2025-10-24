@@ -11,6 +11,7 @@ urlpatterns = [
     path('chat/', views.chat, name='chat'),
     path('email/', views.email, name='email'),         # 이메일 입력
     path('password/', views.password, name='password'),    # 새 비밀번호 입력
+    path("password_reset/", views.password_reset, name="password_reset"),
     path('terms/', views.terms, name='terms'),  # ✅ 약관 보기
     path("chat/api/send/", views.chat_send, name="chat_send"),
     path("chat/api/list/", views.chat_list, name="chat_list"),

@@ -6,14 +6,18 @@ from django.contrib.auth.models import User
 from django.contrib.auth import authenticate, login as auth_login
 from django.conf import settings
 from datetime import datetime
-from .models import Message, EmailVerification  # ★ EmailVerification 함께 import
+from .models import Message, EmailVerification, TempPassword  # ★ EmailVerification 함께 import
 import re
+from django.utils.crypto import get_random_string
 
 # 이메일 발송에 필요한 것들
 from django.core.mail import send_mail
 from django.utils import timezone
-import random
+import random, string
 
+# 유효성 검사
+from django.core.validators import validate_email
+from django.core.exceptions import ValidationError
 
 # ---------------------------
 # 공용 유틸 (views.py 안에 포함)
@@ -84,6 +88,11 @@ def sign(request):
     if request.method == "POST":
         username  = request.POST.get("username", "").strip()
         email     = request.POST.get("email", "").strip()
+        try:
+            validate_email(email)
+        except ValidationError: 
+            messages.error(request, "유효한 이메일 형식을 입력하세요.")
+            return render(request, "uauth/sign.html")
         password1 = request.POST.get("password1", "")
         password2 = request.POST.get("password2", "")
         agree     = request.POST.get("agree")  # 약관 동의 체크박스 ('yes')
@@ -110,7 +119,7 @@ def sign(request):
             # if user:
             #     auth_login(request, user)
             #     return redirect("uauth:chat")
-
+                              
             messages.success(request, "회원가입이 완료되었습니다. 로그인 해주세요.")
             return redirect("uauth:login")
 
@@ -189,6 +198,91 @@ def password(request):
             return redirect("uauth:login")
 
     return render(request, "uauth/password.html")
+
+
+# 임시 비밀번호 생성 + 이메일 발송
+def generate_temp_password(length=8):
+    chars = string.ascii_letters + string.digits + "!@#$%^&*"
+    return ''.join(random.choice(chars) for _ in range(length))
+
+def send_temp_password_email(user, temp_pw):
+    send_mail(
+        subject="임시 비밀번호 발송",
+        message=f"임시 비밀번호: {temp_pw}",
+        from_email="no-reply@yoursite.com",
+        recipient_list=[user.email],
+        fail_silently=False,
+    )
+
+def password_reset(request):
+    step = int(request.POST.get('step', 1))
+    email_address = request.POST.get('email', '').strip()
+    context = {'step': step, 'email': email_address}
+
+    # STEP 1: 이메일 입력 → 임시 비밀번호 발송
+    if step == 1 and request.method == 'POST':
+        email_address = request.POST.get('email','').strip()
+
+        try:
+            user = User.objects.get(email=email_address)
+        except User.DoesNotExist:
+            messages.error(request, "등록되지 않은 이메일입니다.")
+            return render(request, 'uauth/password_reset.html', context)
+
+        temp_pw = get_random_string(length=8)  # 임시 비밀번호 생성
+        user.set_password(temp_pw)
+        user.save()
+        send_temp_password_email(user, temp_pw)  # user 객체와 함께 전달
+        messages.success(request, "임시 비밀번호가 이메일로 발송되었습니다.")
+        context['step'] = 2
+        return render(request, 'uauth/password_reset.html', context)
+
+    # STEP 2: 임시 비밀번호 입력 → 인증
+    if step == 2 and request.method == 'POST':
+        temp_pw = request.POST.get('temp_password', '').strip()
+    try:
+        user = User.objects.get(email=email_address)
+    except User.DoesNotExist:
+        # messages.error(request, "등록되지 않은 이메일입니다.")
+        context['step'] = 1
+        return render(request, 'uauth/password_reset.html', context)
+
+        # 임시 비밀번호 인증 성공 → 자동 로그인 후 STEP 3
+        user = authenticate(username=user.username, password=temp_pw)
+    if user:
+        auth_login(request, user)
+        context['step'] = 3
+        return render(request, 'uauth/password_reset.html', context)
+    else:
+        messages.error(request, "임시 비밀번호가 올바르지 않습니다.")
+        return render(request, 'uauth/password_reset.html', context)
+    
+    # STEP 3: 새 비밀번호 입력 → 변경 완료
+    # if step == 3 and request.method == 'POST':
+    #     password1 = request.POST.get('password1', '')
+    #     password2 = request.POST.get('password2', '')
+
+    #     if password1 != password2:
+    #         messages.error(request, "비밀번호가 일치하지 않습니다.")
+    #         context['step'] = 3
+    #         return render(request, 'uauth/password_reset.html', context)
+
+    #     if len(password1) < 5 or len(password1) > 16:
+    #         messages.error(request, "비밀번호는 5~16자여야 합니다.")
+    #         context['step'] = 3
+    #         return render(request, 'uauth/password_reset.html', context)
+
+    #     # 현재 로그인한 사용자 비밀번호 변경
+    #     user = request.user
+    #     user.set_password(password1)
+    #     user.save()
+    #     messages.success(request, "비밀번호가 변경되었습니다. 로그인하세요.")
+    #     return redirect('uauth:login')
+
+    # 초기 화면 (STEP 1)
+    # context['step'] = 1
+    # return render(request, 'uauth/password_reset.html', context)
+    
 
 # ---------------------------
 # 채팅 API
@@ -280,3 +374,39 @@ def ajax_send_code(request):
         return JsonResponse({"status": "error", "message": f"메일 발송 실패: {e}"})
 
     return JsonResponse({"status": "ok", "message": "인증번호를 전송했습니다."})
+
+
+def password_reset_request(request):
+    if request.method == "POST":
+        email = request.POST.get("email", "").strip()
+        if not email:
+            messages.error(request, "이메일을 입력해주세요.")
+            return render(request, "uauth/password_reset.html")
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            messages.error(request, "등록되지 않은 이메일입니다.")
+            return render(request, "uauth/password_reset.html")
+
+        # 임시 비밀번호 생성
+        temp_password = get_random_string(length=10)  # 랜덤 10자리
+        user.set_password(temp_password)
+        user.save()
+
+        # 이메일 발송
+        try:
+            send_mail(
+                subject="[YourService] 임시 비밀번호 안내",
+                message=f"임시 비밀번호: {temp_password}\n로그인 후 꼭 비밀번호를 변경해주세요.",
+                from_email="noreply@yourservice.com",
+                recipient_list=[email],
+                fail_silently=False,
+            )
+            messages.success(request, "임시 비밀번호가 이메일로 전송되었습니다.")
+            return redirect("uauth:login")
+        except Exception as e:
+            messages.error(request, f"메일 발송 실패: {e}")
+            return render(request, "uauth/password_reset.html")
+
+    return render(request, "uauth/password_reset.html")
