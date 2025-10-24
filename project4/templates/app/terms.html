@@ -1,0 +1,16 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>이용약관</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    .frame { width: 100%; height: 100vh; border: 0; }
+  </style>
+</head>
+<body>
+  <!-- static/docs/terms.pdf 에 파일을 두었다고 가정 -->
+  <iframe class="frame" src="{% static 'docs/이용약관.txt' %}"></iframe>
+</body>
+</html>
