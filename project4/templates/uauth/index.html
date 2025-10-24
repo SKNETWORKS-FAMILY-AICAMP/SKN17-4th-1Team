@@ -1,0 +1,213 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chative Jobs – PDF Auto Slide</title>
+
+  <!-- PDF.js (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+
+  <style>
+    :root{
+      --fade:600ms;                 /* 페이드 전환 시간 */
+      --interval:700ms;            /* 5초 간격 */
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; background:#000; color:#fff;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans KR","Malgun Gothic",sans-serif;
+      overflow:hidden;
+    }
+
+    /* ===== Topbar (항상 클릭 가능) ===== */
+    .topbar{
+      position:fixed; left:0; right:0; top:0; height:72px;
+      z-index:50;                      /* stage 보다 위 */
+      pointer-events:auto;             /* 클릭 허용 */
+    }
+    .topbar .left{position:absolute; top:14px; left:14px}
+    .topbar .right{
+      position:absolute; top:18px; right:18px;
+      display:flex; gap:14px; align-items:center;
+    }
+    .logo{
+      width:44px;height:44px;border-radius:50%;
+      display:grid;place-items:center;overflow:hidden;
+      background:#222;border:1px solid #0006;
+    }
+    .logo img{width:100%;height:100%;object-fit:cover}
+    .link{color:#ddd;text-decoration:none}
+    .link:hover{color:#fff}
+    .btn{
+      padding:10px 18px;border-radius:999px;background:#e8e8e8;
+      color:#111;font-weight:700;text-decoration:none;border:1px solid #0003;
+    }
+
+    /* ===== Stage ===== */
+    .stage{
+      position:fixed; inset:0; z-index:10;
+      display:grid; place-items:center; padding:16px;
+    }
+    .frame{
+      position:relative; max-width:min(1280px,92vw); max-height:78vh;
+      width:100%; height:100%;
+      display:grid; place-items:center;
+      border-radius:18px; background:#0c0c0c;
+      box-shadow:0 18px 60px rgba(0,0,0,.5), 0 0 0 1px #ffffff10 inset;
+      overflow:hidden;
+    }
+    canvas{
+      width:100%; height:100%; object-fit:contain;
+      transition:opacity var(--fade) ease;
+    }
+    canvas.fade{opacity:0}
+
+    /* (옵션) 하단 컨트롤 보이려면 hidden 제거 */
+    .controls{
+      position:fixed; left:50%; transform:translateX(-50%);
+      bottom:16px; display:flex; align-items:center; gap:10px;
+      background:#111a; backdrop-filter:blur(6px);
+      border:1px solid #ffffff1a; color:#fff;
+      padding:8px 12px; border-radius:12px; z-index:40;
+    }
+    .controls button{
+      background:#fff1; color:#fff; border:1px solid #ffffff22;
+      padding:8px 10px; border-radius:10px; cursor:pointer;
+    }
+    .controls .meta{opacity:.85}
+    .hidden{display:none}
+  </style>
+</head>
+<body>
+
+  <!-- Topbar -->
+  <div class="topbar">
+    <div class="left">
+      <a class="logo" href="#">
+        <img src="{% static 'img/logo.png' %}" alt="logo" onerror="this.parentElement.textContent='🧠'">
+      </a>
+    </div>
+    <div class="right">
+      <a class="link" href="{% url 'uauth:login' %}">Login</a>
+      <a class="btn"  href="{% url 'uauth:sign' %}">Join</a>
+    </div>
+  </div>
+
+  <!-- Stage -->
+  <div class="stage">
+    <div class="frame">
+      <canvas id="pdfCanvas" class="fade"></canvas>
+    </div>
+  </div>
+
+  <!-- Controls (원하면 hidden 제거) -->
+  <div class="controls hidden" id="controls">
+    <button id="prevBtn">⟵ Prev</button>
+    <button id="playBtn">⏸ Pause</button>
+    <button id="nextBtn">Next ⟶</button>
+    <span class="meta" id="meta">1 / 1</span>
+  </div>
+
+<script>
+/* ========= 설정 ========= */
+// 1) 기본 PDF 경로 (템플릿 태그로 정적 경로 주입)
+const DEFAULT_PDF = "{% static 'pdfs/Jobs.pdf' %}";
+// 2) 자동 전환 간격(ms)
+const INTERVAL_MS = 5000;
+/* ======================= */
+
+const urlParams = new URLSearchParams(location.search);
+const PDF_URL = urlParams.get("pdf") || DEFAULT_PDF;
+
+const canvas = document.getElementById("pdfCanvas");
+const ctx = canvas.getContext("2d");
+
+const controls = document.getElementById("controls");
+const prevBtn = document.getElementById("prevBtn");
+const nextBtn = document.getElementById("nextBtn");
+const playBtn = document.getElementById("playBtn");
+const meta = document.getElementById("meta");
+
+let pdfDoc = null;
+let currentPage = 1;
+let totalPages = 1;
+let playing = true;
+let timer = null;
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+
+init();
+
+async function init(){
+  try{
+    pdfDoc = await pdfjsLib.getDocument(PDF_URL).promise;
+    totalPages = pdfDoc.numPages;
+    meta.textContent = `${currentPage} / ${totalPages}`;
+    await renderPage(currentPage, true);
+    startAuto();
+    // controls.classList.remove('hidden'); // 필요 시 컨트롤 노출
+    window.addEventListener("resize", debounce(()=> renderPage(currentPage), 120));
+  }catch(e){
+    console.error(e);
+    alert("PDF를 불러오지 못했습니다. 경로와 static 설정을 확인하세요.");
+  }
+}
+
+function startAuto(){
+  clearInterval(timer);
+  if(!playing) return;
+  timer = setInterval(nextPage, INTERVAL_MS);
+}
+function pauseAuto(){ clearInterval(timer); }
+
+async function renderPage(num, initial=false){
+  const page = await pdfDoc.getPage(num);
+
+  // 화면 비율에 맞춰 contain 스케일링
+  const view = page.getViewport({ scale: 1 });
+  const box = document.querySelector(".frame");
+  const scale = Math.min(box.clientWidth / view.width, box.clientHeight / view.height);
+  const viewport = page.getViewport({ scale });
+
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(viewport.width * dpr);
+  canvas.height = Math.floor(viewport.height * dpr);
+  canvas.style.width = Math.floor(viewport.width) + "px";
+  canvas.style.height = Math.floor(viewport.height) + "px";
+
+  const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null;
+
+  if(!initial) canvas.classList.add("fade");
+  await page.render({ canvasContext: ctx, transform, viewport }).promise;
+  requestAnimationFrame(()=> canvas.classList.remove("fade"));
+
+  meta.textContent = `${currentPage} / ${totalPages}`;
+}
+
+function nextPage(){
+  currentPage = currentPage >= totalPages ? 1 : currentPage + 1;
+  renderPage(currentPage);
+}
+function prevPage(){
+  currentPage = currentPage <= 1 ? totalPages : currentPage - 1;
+  renderPage(currentPage);
+}
+
+/* (옵션) 컨트롤 */
+prevBtn?.addEventListener("click", ()=>{ pauseAuto(); playing=false; playBtn.textContent="▶ Play"; prevPage(); });
+nextBtn?.addEventListener("click", ()=>{ pauseAuto(); playing=false; playBtn.textContent="▶ Play"; nextPage(); });
+playBtn?.addEventListener("click", ()=>{
+  playing = !playing;
+  if(playing){ playBtn.textContent="⏸ Pause"; startAuto(); }
+  else { playBtn.textContent="▶ Play"; pauseAuto(); }
+});
+
+/* 유틸 */
+function debounce(fn, ms){ let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), ms); }; }
+</script>
+</body>
+</html>
