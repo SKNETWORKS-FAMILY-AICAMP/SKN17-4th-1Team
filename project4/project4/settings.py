@@ -41,7 +41,9 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.humanize",
-    "app"
+    "uauth",
+    "chat",
+    "files",
 
 ]
 
@@ -82,8 +84,8 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'chatdb',
-        'USER': 'chat',
-        'PASSWORD': 'chat',
+        'USER': 'django',
+        'PASSWORD': 'django',
         'HOST': '127.0.0.1',
         'PORT': '3306',
         'OPTIONS': {
