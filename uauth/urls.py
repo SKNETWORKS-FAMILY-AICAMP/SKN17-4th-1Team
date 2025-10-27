@@ -15,7 +15,6 @@ urlpatterns = [
     path('terms/', views.terms, name='terms'),
     path("chat/api/send/", views.chat_send, name="chat_send"),
     path("chat/api/list/", views.chat_list, name="chat_list"),
-    path("test-email/", views.test_email),
     path("email/send-code/", views.ajax_send_code, name="ajax_send_code"),
     path("email/verify-code/", views.ajax_verify_code, name="ajax_verify_code"),
     # JSON API for SPA

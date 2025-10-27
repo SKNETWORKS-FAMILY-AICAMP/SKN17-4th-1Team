@@ -1,45 +1,46 @@
+# 04_project/llm_integration/llmproxy/utils/storage.py
 import os
-import pathlib
-from typing import BinaryIO
-
+import uuid
 import boto3
-from botocore.exceptions import BotoCoreError, NoCredentialsError
+from django.conf import settings
+from urllib.parse import quote
 
+def _safe_filename(name: str) -> str:
+    # 공백 정리
+    name = (name or "file").strip()
+    # 너무 긴 이름 컷
+    if len(name) > 140:
+        base, dot, ext = name.rpartition(".")
+        name = (base[:120] + ("." + ext if ext else "")) if base else name[:140]
+    return name
 
-def s3_is_configured() -> bool:
-    return bool(os.getenv("AWS_S3_BUCKET"))
-
-
-def upload_file(file_obj: BinaryIO, filename: str) -> str:
+def upload_file(django_file, original_name: str, prefix: str = "uploads/") -> str:
     """
-    Upload file to S3 if configured; otherwise save under local `files/uploads/`.
-    Returns a URL or local path string.
+    S3에 업로드하고 '비서명 URL'을 반환한다.
+    presigned URL은 뷰단에서 매요청 생성해 내려준다.
     """
-    bucket = os.getenv("AWS_S3_BUCKET")
-    region = os.getenv("AWS_S3_REGION", "ap-northeast-2")
+    bucket = getattr(settings, "AWS_S3_BUCKET", "") or getattr(settings, "AWS_STORAGE_BUCKET_NAME", "")
+    region = getattr(settings, "AWS_S3_REGION_NAME", "") or getattr(settings, "AWS_REGION", "")
+    if not bucket or not region:
+        raise RuntimeError("S3 bucket/region not configured")
 
-    if bucket:
-        try:
-            s3 = boto3.client(
-                "s3",
-                region_name=region,
-                aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-                aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            )
-            key = f"uploads/{filename}"
-            s3.upload_fileobj(file_obj, bucket, key, ExtraArgs={"ACL": "public-read"})
-            return f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
-        except (BotoCoreError, NoCredentialsError):
-            pass  # fall through to local
+    # 키 생성: uploads/{user_or_session}/.../uuid-원본파일명
+    safe_name = _safe_filename(original_name)
+    unique = uuid.uuid4().hex
+    key = f"{prefix}{unique}-{safe_name}"
 
-    # local fallback
-    base = pathlib.Path("files/uploads")
-    base.mkdir(parents=True, exist_ok=True)
-    dest = base / filename
-    # Reset read pointer if necessary
-    if hasattr(file_obj, "seek"):
-        file_obj.seek(0)
-    with open(dest, "wb") as out:
-        out.write(file_obj.read())
-    return f"/files/uploads/{filename}"
+    s3 = boto3.client(
+        "s3",
+        region_name=region,
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID", getattr(settings, "AWS_ACCESS_KEY_ID", None)),
+        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY", getattr(settings, "AWS_SECRET_ACCESS_KEY", None)),
+    )
 
+    # 업로드
+    extra_args = {"ContentType": getattr(django_file, "content_type", "application/octet-stream")}
+    s3.upload_fileobj(django_file, bucket, key, ExtraArgs=extra_args)
+
+    # 비서명 URL 반환 (virtual-hosted style)
+    # 키에는 퍼센트 인코딩 필요(브라우저 안전), DB에는 이 "비서명 URL"만 저장
+    encoded_key = quote(key)
+    return f"https://{bucket}.s3.{region}.amazonaws.com/{encoded_key}"

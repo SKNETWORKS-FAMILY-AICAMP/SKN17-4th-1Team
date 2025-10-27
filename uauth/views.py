@@ -29,7 +29,7 @@ def generate_code(length: int = 6) -> str:
 
 def send_verification_email(email: str, code: str) -> None:
     """인증번호 이메일 발송"""
-    subject = "[CHATIVE] 이메일 인증번호 안내"
+    subject = "[CHATIVE JOBS] 이메일 인증번호 안내"
     message = (
         f"안녕하세요.\n\n"
         f"요청하신 인증번호는 {code} 입니다.\n"
@@ -259,7 +259,7 @@ def generate_temp_password(length=8):
 
 def send_temp_password_email(user, temp_pw):
     send_mail(
-        subject="임시 비밀번호 발송",
+        subject="[CHATIVE JOBS] 임시 비밀번호 발송",
         message=f"임시 비밀번호: {temp_pw}",
         from_email="no-reply@yoursite.com",
         recipient_list=[user.email],
@@ -310,26 +310,26 @@ def password_reset(request):
         return render(request, 'uauth/password_reset.html', context)
     
     # STEP 3: 새 비밀번호 입력 → 변경 완료
-    # if step == 3 and request.method == 'POST':
-    #     password1 = request.POST.get('password1', '')
-    #     password2 = request.POST.get('password2', '')
+    if step == 3 and request.method == 'POST':
+        password1 = request.POST.get('password1', '')
+        password2 = request.POST.get('password2', '')
 
-    #     if password1 != password2:
-    #         messages.error(request, "비밀번호가 일치하지 않습니다.")
-    #         context['step'] = 3
-    #         return render(request, 'uauth/password_reset.html', context)
+        if password1 != password2:
+            messages.error(request, "비밀번호가 일치하지 않습니다.")
+            context['step'] = 3
+            return render(request, 'uauth/password_reset.html', context)
 
-    #     if len(password1) < 5 or len(password1) > 16:
-    #         messages.error(request, "비밀번호는 5~16자여야 합니다.")
-    #         context['step'] = 3
-    #         return render(request, 'uauth/password_reset.html', context)
+        if len(password1) < 5 or len(password1) > 16:
+            messages.error(request, "비밀번호는 5~16자여야 합니다.")
+            context['step'] = 3
+            return render(request, 'uauth/password_reset.html', context)
 
-    #     # 현재 로그인한 사용자 비밀번호 변경
-    #     user = request.user
-    #     user.set_password(password1)
-    #     user.save()
-    #     messages.success(request, "비밀번호가 변경되었습니다. 로그인하세요.")
-    #     return redirect('uauth:login')
+        # 현재 로그인한 사용자 비밀번호 변경
+        user = request.user
+        user.set_password(password1)
+        user.save()
+        messages.success(request, "비밀번호가 변경되었습니다. 로그인하세요.")
+        return redirect('uauth:login')
 
     # 초기 화면 (STEP 1)
     # context['step'] = 1
@@ -383,21 +383,6 @@ def chat_list(request):
         for m in reversed(qs)  # 오래된→최신
     ]
     return JsonResponse({"ok": True, "items": items})
-
-
-# ---------------------------
-# 메일 테스트 & 인증코드 발송
-# ---------------------------
-def test_email(request):
-    to = "spaingogo2@gmail.com"  # ← 본인 실제 이메일로 변경!
-    sent = send_mail(
-        subject="[테스트] Django 이메일 발송 확인",
-        message="이메일 설정이 정상 작동합니다.",
-        from_email=settings.DEFAULT_FROM_EMAIL,  # settings에 설정된 발신자
-        recipient_list=[to],
-        fail_silently=False,  # 실패 시 예외 발생 → 콘솔에서 원인 확인 가능
-    )
-    return HttpResponse(f"✅ send_mail 반환값: {sent} (1이면 성공) / 받는이={to}")
 
 
 @require_POST
@@ -462,3 +447,11 @@ def password_reset_request(request):
             return render(request, "uauth/password_reset.html")
 
     return render(request, "uauth/password_reset.html")
+
+def password_reset(request):
+    # 템플릿 기반 다단계 비번 재설정은 사용하지 않음 (SPA API 사용)
+    return redirect('/llm/')
+
+def password_reset_request(request):
+    # 템플릿 기반 요청도 비활성화
+    return redirect('/llm/')
